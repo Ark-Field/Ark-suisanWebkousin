@@ -10,8 +10,8 @@ from PIL import Image
 # ページのレイアウト設定
 st.set_page_config(page_title="アークフィールド 価格表更新ツール", page_icon="📦", layout="wide")
 
-st.title("📦 商品価格・画像・行一括管理ツール（画像クリック別ウィンドウ拡大対応）")
-st.write("FTPから注文ページのHTMLを読み込み、商品の編集・行の追加・削除、および**画像クリックで別ウィンドウ拡大表示**する機能を組み込んでサーバーに反映します。")
+st.title("📦 WEB商品価格更新・画像更新・管理ツール")
+st.write("即座にサーバーに反映します。")
 
 # --- 設定情報 ---
 FTP_HOST = "ftp.arkf.jp"
