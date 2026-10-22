@@ -10,8 +10,8 @@ from PIL import Image
 # ページのレイアウト設定
 st.set_page_config(page_title="アークフィールド 価格表更新ツール", page_icon="📦", layout="wide")
 
-st.title("📦 商品価格・画像・行一括管理ツール（画像サイズ自動固定対応）")
-st.write("FTPから注文ページのHTMLを読み込み、商品の編集・行の追加・削除、および**写真の自動リサイズ＆入れ替え**を行います。")
+st.title("📦 商品価格・画像・行一括管理ツール（画像クリック別ウィンドウ拡大対応）")
+st.write("FTPから注文ページのHTMLを読み込み、商品の編集・行の追加・削除、および**画像クリックで別ウィンドウ拡大表示**する機能を組み込んでサーバーに反映します。")
 
 # --- 設定情報 ---
 FTP_HOST = "ftp.arkf.jp"
@@ -112,17 +112,17 @@ else:
     )
     
     st.markdown("---")
-    st.subheader("🖼️ 3. 写真（画像）の入れ替え・追加（自動で正方形にサイズ統一）")
+    st.subheader("🖼️ 3. 写真（画像）の入れ替え・追加（自動正方形リサイズ）")
     product_names = [name for name in edited_df["商品名"].dropna().tolist() if name.strip() != ""]
     if product_names:
         selected_product = st.selectbox("写真を変更・追加する商品を選択", product_names)
-        uploaded_image = st.file_uploader("新しい画像を選択（どんな縦長・横長の写真でも自動で綺麗に整えられます）", type=["jpg", "jpeg", "png"], key="img_uploader")
+        uploaded_image = st.file_uploader("新しい画像を選択", type=["jpg", "jpeg", "png"], key="img_uploader")
         
         if uploaded_image is not None:
             st.image(uploaded_image, width=150, caption=f"選択中: {selected_product}")
             if st.button("この画像をセットする"):
                 st.session_state.image_updates[selected_product] = uploaded_image
-                st.success(f"「{selected_product}」の画像を変更リストに登録しました（保存時に自動でサイズが統一されます）。")
+                st.success(f"「{selected_product}」の画像を変更リストに登録しました。")
 
     if st.session_state.image_updates:
         st.write("📌 **変更予定の画像:**")
@@ -141,7 +141,7 @@ else:
         if not ftp_pass:
             st.error("⚠️ 左側のサイドバーにFTPパスワードを入力してください。")
         else:
-            with st.spinner("サーバーのHTMLを更新し、画像を自動リサイズしてアップロード中..."):
+            with st.spinner("サーバーのHTMLを更新し、画像をアップロード中..."):
                 try:
                     ftp = FTP(FTP_HOST)
                     ftp.login(FTP_USER, ftp_pass)
@@ -192,11 +192,13 @@ else:
                             # HTMLの各列タグを組み立て
                             new_tr = soup.new_tag("tr")
                             
-                            # 画像列
+                            # 画像列（★画像をクリックすると別タブで拡大表示されるように <a> タグで囲む）
                             td_img = soup.new_tag("td", attrs={"class": "img-col"})
                             if has_custom_img and img_src:
+                                a_tag = soup.new_tag("a", attrs={"href": img_src, "target": "_blank", "title": "クリックして拡大表示"})
                                 img_tag = soup.new_tag("img", src=img_src)
-                                td_img.append(img_tag)
+                                a_tag.append(img_tag)
+                                td_img.append(a_tag)
                             else:
                                 span_no_img = soup.new_tag("span", attrs={"class": "no-image"})
                                 span_no_img.string = "No Image"
@@ -242,22 +244,19 @@ else:
                             
                             tbody.append(new_tr)
 
-                    # 3. 新規・変更された画像を【自動正方形リサイズ】してアップロード
+                    # 3. 新規・変更された画像を正方形リサイズしてアップロード
                     for p_name, img_file in st.session_state.image_updates.items():
                         safe_name = re.sub(r'[^\w\-_]', '_', p_name)
                         img_filename = f"{safe_name}.jpg"
                         remote_img_path = f"cyumon/images/{img_filename}"
                         
-                        # PILで画像を読み込んで正方形（400x400px）にトリミング＆リサイズ
                         img = Image.open(img_file)
                         if img.mode in ("RGBA", "P"):
                             img = img.convert("RGB")
                         
-                        # 中央を基準に正方形に切り抜く処理 (サムネイル作成)
                         target_size = (400, 400)
                         img.thumbnail(target_size, Image.Resampling.LANCZOS)
                         
-                        # 余白をつけて正方形にする（または綺麗にリサイズ）
                         new_img = Image.new("RGB", target_size, (255, 255, 255))
                         paste_x = (target_size[0] - img.width) // 2
                         paste_y = (target_size[1] - img.height) // 2
@@ -266,7 +265,6 @@ else:
                         temp_img_path = f"temp_{img_filename}"
                         new_img.save(temp_img_path, "JPEG", quality=90)
                         
-                        # FTPアップロード
                         with open(temp_img_path, "rb") as f:
                             ftp.storbinary(f"STOR {remote_img_path}", f)
                         
@@ -281,7 +279,7 @@ else:
                         ftp.storbinary(f"STOR {REMOTE_HTML_PATH}", f)
                     
                     ftp.quit()
-                    st.success("🎉 写真が自動で綺麗にサイズ統一され、すべての変更がサーバーに反映されました！")
+                    st.success("🎉 画像クリックで別タブ拡大表示の機能付きで、サーバーが正常に更新されました！")
                     
                 except Exception as e:
                     st.error(f"❌ 更新中にエラーが発生しました: {e}")
