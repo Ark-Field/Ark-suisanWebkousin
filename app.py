@@ -5,12 +5,13 @@ from bs4 import BeautifulSoup
 from datetime import datetime
 import pandas as pd
 import re
+from PIL import Image
 
 # ページのレイアウト設定
 st.set_page_config(page_title="アークフィールド 価格表更新ツール", page_icon="📦", layout="wide")
 
-st.title("📦 商品価格・画像・行一括管理ツール")
-st.write("FTPから注文ページのHTMLを読み込み、商品の編集・**新規行追加・削除**、および画像入れ替えを行ってサーバーに反映します。")
+st.title("📦 商品価格・画像・行一括管理ツール（画像サイズ自動固定対応）")
+st.write("FTPから注文ページのHTMLを読み込み、商品の編集・行の追加・削除、および**写真の自動リサイズ＆入れ替え**を行います。")
 
 # --- 設定情報 ---
 FTP_HOST = "ftp.arkf.jp"
@@ -95,7 +96,6 @@ else:
     df = pd.DataFrame(st.session_state.products)
     editor_df = df[["商品名", "ロット", "価格", "備考", "画像状態"]].copy()
     
-    # num_rows="dynamic" により行の追加・削除が可能に！
     edited_df = st.data_editor(
         editor_df,
         column_config={
@@ -112,17 +112,17 @@ else:
     )
     
     st.markdown("---")
-    st.subheader("🖼️ 3. 写真（画像）の入れ替え・追加")
+    st.subheader("🖼️ 3. 写真（画像）の入れ替え・追加（自動で正方形にサイズ統一）")
     product_names = [name for name in edited_df["商品名"].dropna().tolist() if name.strip() != ""]
     if product_names:
         selected_product = st.selectbox("写真を変更・追加する商品を選択", product_names)
-        uploaded_image = st.file_uploader("新しい画像を選択", type=["jpg", "jpeg", "png"], key="img_uploader")
+        uploaded_image = st.file_uploader("新しい画像を選択（どんな縦長・横長の写真でも自動で綺麗に整えられます）", type=["jpg", "jpeg", "png"], key="img_uploader")
         
         if uploaded_image is not None:
             st.image(uploaded_image, width=150, caption=f"選択中: {selected_product}")
             if st.button("この画像をセットする"):
                 st.session_state.image_updates[selected_product] = uploaded_image
-                st.success(f"「{selected_product}」の画像を変更リストに登録しました。")
+                st.success(f"「{selected_product}」の画像を変更リストに登録しました（保存時に自動でサイズが統一されます）。")
 
     if st.session_state.image_updates:
         st.write("📌 **変更予定の画像:**")
@@ -141,7 +141,7 @@ else:
         if not ftp_pass:
             st.error("⚠️ 左側のサイドバーにFTPパスワードを入力してください。")
         else:
-            with st.spinner("サーバーのHTMLを更新し、画像をアップロード中..."):
+            with st.spinner("サーバーのHTMLを更新し、画像を自動リサイズしてアップロード中..."):
                 try:
                     ftp = FTP(FTP_HOST)
                     ftp.login(FTP_USER, ftp_pass)
@@ -193,40 +193,40 @@ else:
                             new_tr = soup.new_tag("tr")
                             
                             # 画像列
-                            td_img = soup.new_tag("td", **{"class": "img-col"})
+                            td_img = soup.new_tag("td", attrs={"class": "img-col"})
                             if has_custom_img and img_src:
                                 img_tag = soup.new_tag("img", src=img_src)
                                 td_img.append(img_tag)
                             else:
-                                span_no_img = soup.new_tag("span", **{"class": "no-image"})
+                                span_no_img = soup.new_tag("span", attrs={"class": "no-image"})
                                 span_no_img.string = "No Image"
                                 td_img.append(span_no_img)
                             new_tr.append(td_img)
                             
                             # 商品情報列
-                            td_name = soup.new_tag("td", **{"class": "name-col"})
-                            div_pname = soup.new_tag("div", **{"class": "product-name"})
+                            td_name = soup.new_tag("td", attrs={"class": "name-col"})
+                            div_pname = soup.new_tag("div", attrs={"class": "product-name"})
                             div_pname.string = p_name
                             td_name.append(div_pname)
                             
-                            div_plot = soup.new_tag("div", **{"class": "product-lot"})
+                            div_plot = soup.new_tag("div", attrs={"class": "product-lot"})
                             div_plot.string = f"ロット: {p_lot}"
                             td_name.append(div_plot)
                             new_tr.append(td_name)
                             
                             # 価格列
-                            td_price = soup.new_tag("td", **{"class": "price-col"})
+                            td_price = soup.new_tag("td", attrs={"class": "price-col"})
                             td_price.string = p_price
                             new_tr.append(td_price)
                             
                             # 備考列
-                            td_note = soup.new_tag("td", **{"class": "note-col"})
+                            td_note = soup.new_tag("td", attrs={"class": "note-col"})
                             td_note.string = p_note
                             new_tr.append(td_note)
                             
-                            # 注文数入力列（フォーム連動用属性つき）
-                            td_qty = soup.new_tag("td", **{"class": "qty-col"})
-                            input_qty = soup.new_tag("input", **{
+                            # 注文数入力列
+                            td_qty = soup.new_tag("td", attrs={"class": "qty-col"})
+                            input_qty = soup.new_tag("input", attrs={
                                 "type": "number",
                                 "class": "qty-input",
                                 "name": p_name,
@@ -242,16 +242,31 @@ else:
                             
                             tbody.append(new_tr)
 
-                    # 3. 新規・変更された画像のアップロード
+                    # 3. 新規・変更された画像を【自動正方形リサイズ】してアップロード
                     for p_name, img_file in st.session_state.image_updates.items():
                         safe_name = re.sub(r'[^\w\-_]', '_', p_name)
                         img_filename = f"{safe_name}.jpg"
                         remote_img_path = f"cyumon/images/{img_filename}"
                         
-                        temp_img_path = f"temp_{img_filename}"
-                        with open(temp_img_path, "wb") as f:
-                            f.write(img_file.getbuffer())
+                        # PILで画像を読み込んで正方形（400x400px）にトリミング＆リサイズ
+                        img = Image.open(img_file)
+                        if img.mode in ("RGBA", "P"):
+                            img = img.convert("RGB")
                         
+                        # 中央を基準に正方形に切り抜く処理 (サムネイル作成)
+                        target_size = (400, 400)
+                        img.thumbnail(target_size, Image.Resampling.LANCZOS)
+                        
+                        # 余白をつけて正方形にする（または綺麗にリサイズ）
+                        new_img = Image.new("RGB", target_size, (255, 255, 255))
+                        paste_x = (target_size[0] - img.width) // 2
+                        paste_y = (target_size[1] - img.height) // 2
+                        new_img.paste(img, (paste_x, paste_y))
+                        
+                        temp_img_path = f"temp_{img_filename}"
+                        new_img.save(temp_img_path, "JPEG", quality=90)
+                        
+                        # FTPアップロード
                         with open(temp_img_path, "rb") as f:
                             ftp.storbinary(f"STOR {remote_img_path}", f)
                         
@@ -266,7 +281,7 @@ else:
                         ftp.storbinary(f"STOR {REMOTE_HTML_PATH}", f)
                     
                     ftp.quit()
-                    st.success("🎉 新規行の追加・削除・編集を含むすべての変更がサーバーに正常に反映されました！")
+                    st.success("🎉 写真が自動で綺麗にサイズ統一され、すべての変更がサーバーに反映されました！")
                     
                 except Exception as e:
                     st.error(f"❌ 更新中にエラーが発生しました: {e}")
