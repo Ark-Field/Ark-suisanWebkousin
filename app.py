@@ -3,100 +3,156 @@ import os
 from ftplib import FTP
 from bs4 import BeautifulSoup
 from datetime import datetime
+import pandas as pd
+import re
 
-# ページの設定
-st.set_page_config(page_title="アークフィールド 価格表更新ツール", page_icon="📦")
+# ページのレイアウト設定（広めの画面にします）
+st.set_page_config(page_title="アークフィールド 価格表更新ツール", page_icon="📦", layout="wide")
 
-st.title("📦 商品価格・画像更新ツール")
-st.write("FTP経由でサーバーの注文ページを安全に更新します。")
+st.title("📦 商品価格・画像一括更新ツール")
+st.write("FTPから注文ページのHTMLを読み込み、商品名・価格・備考・画像の編集を行ってサーバーに反映します。")
 
 # --- 設定情報 ---
 FTP_HOST = "ftp.arkf.jp"
 FTP_USER = "info@arkf.jp"
-
-# 【修正】サーバー上のパス（ログイン直後の位置からの相対パス）
 REMOTE_HTML_PATH = "cyumon/index.html"
 LOCAL_HTML_PATH = "index.html"
 # ----------------
 
-with st.container():
-    st.subheader("1. 認証情報")
-    ftp_pass = st.text_input("FTPパスワードを入力してください", type="password")
+# セッションステートの初期化
+if "products" not in st.session_state:
+    st.session_state.products = None
+if "image_updates" not in st.session_state:
+    st.session_state.image_updates = {}
 
-st.markdown("---")
-
-st.subheader("2. サーバーの接続確認・ファイル一覧の取得")
-st.info("「接続テスト」を押すと、現在のFTP上の位置とファイル一覧を確認できます（パスが正しいか確認用です）。")
-
-if st.button("🔍 サーバーの接続テスト（ファイル一覧を確認）"):
-    if not ftp_pass:
-        st.error("⚠️ FTPパスワードを入力してください。")
-    else:
-        try:
-            with st.spinner("サーバーに接続中..."):
-                ftp = FTP(FTP_HOST)
-                ftp.login(FTP_USER, ftp_pass)
-                
-                # 現在のディレクトリとファイル一覧を取得
-                current_dir = ftp.pwd()
-                files = []
-                ftp.dir(files.append)
-                
-                ftp.quit()
-                
-                st.success(f"✅ 接続成功！現在の場所: `{current_dir}`")
-                st.write("📁 **現在のフォルダの中身:**")
-                for f in files:
-                    st.code(f)
-        except Exception as e:
-            st.error(f"❌ 接続エラー: {e}")
-
-st.markdown("---")
-
-st.subheader("3. 価格表の更新実行")
-if st.button("🚀 価格表の更新を今すぐ実行する", type="primary"):
-    if not ftp_pass:
-        st.error("⚠️ FTPパスワードを入力してください。")
-    else:
-        with st.spinner("処理を実行中... しばらくお待ちください。"):
-            status_box = st.empty()
-            
+# サイドバー：接続とデータ読み込み
+with st.sidebar:
+    st.header("🔑 1. 接続 & データ読込")
+    ftp_pass = st.text_input("FTPパスワード", type="password")
+    
+    if st.button("📥 サーバーから商品データを取得", type="primary"):
+        if not ftp_pass:
+            st.error("⚠️ パスワードを入力してください。")
+        else:
             try:
-                # 1. FTP接続
-                status_box.text("🔌 FTPサーバーに接続中...")
-                ftp = FTP(FTP_HOST)
-                ftp.login(FTP_USER, ftp_pass)
-
-                # 2. HTMLのダウンロード
-                status_box.text(f"📥 サーバーからHTML ({REMOTE_HTML_PATH}) をダウンロード中...")
-                with open(LOCAL_HTML_PATH, "wb") as f:
-                    ftp.retrbinary(f"RETR {REMOTE_HTML_PATH}", f.write)
-
-                # 3. HTMLの解析と更新
-                status_box.text("✍️ HTMLの内容を更新中...")
+                with st.spinner("サーバーからHTMLをダウンロード中..."):
+                    ftp = FTP(FTP_HOST)
+                    ftp.login(FTP_USER, ftp_pass)
+                    with open(LOCAL_HTML_PATH, "wb") as f:
+                        ftp.retrbinary(f"RETR {REMOTE_HTML_PATH}", f.write)
+                    ftp.quit()
+                
+                # HTMLを解析して商品リストを抽出
                 with open(LOCAL_HTML_PATH, "r", encoding="utf-8") as f:
                     soup = BeautifulSoup(f.read(), "html.parser")
-
-                # 価格表更新日の自動日付更新
-                today_str = datetime.now().strftime("価格表更新日：%Y年%m月%d日")
-                date_element = soup.find(class_="update-date")
-                if date_element:
-                    date_element.string = today_str
-
-                # 変更をローカルに保存
-                with open(LOCAL_HTML_PATH, "w", encoding="utf-8") as f:
-                    f.write(str(soup))
-
-                # 4. アップロード
-                status_box.text("📤 更新したHTMLをサーバーにアップロード中...")
-                with open(LOCAL_HTML_PATH, "rb") as f:
-                    ftp.storbinary(f"STOR {REMOTE_HTML_PATH}", f)
-
-                ftp.quit()
                 
-                status_box.empty()
-                st.success("🎉 すべての更新とアップロードが完了しました！")
-
+                products = []
+                for idx, tr in enumerate(soup.find_all("tr")):
+                    name_div = tr.find(class_="product-name")
+                    if not name_div:
+                        continue
+                    
+                    p_name = name_div.text.strip()
+                    
+                    lot_div = tr.find(class_="product-lot")
+                    p_lot = lot_div.text.replace("ロット:", "").strip() if lot_div else ""
+                    
+                    price_td = tr.find(class_="price-col")
+                    p_price = price_td.text.strip() if price_td else ""
+                    
+                    note_td = tr.find(class_="note-col")
+                    p_note = note_td.text.strip() if note_td else ""
+                    
+                    img_col = tr.find(class_="img-col")
+                    has_img = "No Image" not in img_col.text if img_col else False
+                    
+                    products.append({
+                        "id": idx,
+                        "商品名": p_name,
+                        "ロット": p_lot,
+                        "価格": p_price,
+                        "備考": p_note,
+                        "画像状態": "画像あり" if has_img else "No Image"
+                    })
+                
+                st.session_state.products = products
+                st.success(f"✅ {len(products)}件の商品データを読み込みました！")
             except Exception as e:
-                status_box.empty()
-                st.error(f"❌ エラーが発生しました: {e}")
+                st.error(f"❌ エラー: {e}")
+
+# メイン画面：データが読み込まれたら編集UIを表示
+if st.session_state.products is None:
+    st.info("👈 まず左側のサイドバーにFTPパスワードを入力し、「サーバーから商品データを取得」ボタンを押してください。")
+else:
+    st.markdown("---")
+    st.subheader("📝 2. 商品情報の編集（商品名・ロット・価格・備考）")
+    st.write("下の表の中の文字を直接書き換えることで、内容を自由に変更できます。")
+    
+    # 表形式で編集できるUI
+    df = pd.DataFrame(st.session_state.products)
+    edited_df = st.data_editor(
+        df,
+        column_config={
+            "id": None, # ID列は非表示
+            "画像状態": st.column_config.TextColumn("画像状態", disabled=True),
+            "商品名": st.column_config.TextColumn("商品名", width="medium"),
+            "ロット": st.column_config.TextColumn("ロット", width="small"),
+            "価格": st.column_config.TextColumn("価格", width="small"),
+            "備考": st.column_config.TextColumn("備考", width="small"),
+        },
+        hide_index=True,
+        num_rows="fixed",
+        use_container_width=True,
+        key="product_editor"
+    )
+    
+    st.markdown("---")
+    st.subheader("🖼️ 3. 写真（画像）の入れ替え・追加")
+    st.write("写真を入れ替えたい商品を選び、新しい画像ファイル（jpg / png）をアップロードしてください。")
+    
+    product_names = edited_df["商品名"].tolist()
+    selected_product = st.selectbox("写真を変更する商品を選択", product_names)
+    
+    uploaded_image = st.file_uploader("新しい画像を選択", type=["jpg", "jpeg", "png"])
+    
+    if uploaded_image is not None:
+        st.image(uploaded_image, width=150, caption=f"選択中: {selected_product}")
+        if st.button("この画像をセットする"):
+            st.session_state.image_updates[selected_product] = uploaded_image
+            st.success(f"「{selected_product}」の画像を変更リストに登録しました。")
+
+    # セットされている画像の一覧と解除
+    if st.session_state.image_updates:
+        st.write("📌 **変更予定の画像:**")
+        for p_name in list(st.session_state.image_updates.keys()):
+            col1, col2 = st.columns([4, 1])
+            col1.text(f"・ {p_name}")
+            if col2.button("解除", key=f"del_{p_name}"):
+                del st.session_state.image_updates[p_name]
+                st.rerun()
+
+    st.markdown("---")
+    st.subheader("🚀 4. サーバーへの反映")
+    st.info("編集と画像のセットが終わったら、下のボタンを押すと一括でサーバーが更新されます。")
+    
+    if st.button("変更を保存してサーバー（FTP）に反映する", type="primary"):
+        if not ftp_pass:
+            st.error("⚠️ 左側のサイドバーにFTPパスワードを入力してください。")
+        else:
+            with st.spinner("サーバーのHTMLを更新し、画像をアップロード中..."):
+                try:
+                    ftp = FTP(FTP_HOST)
+                    ftp.login(FTP_USER, ftp_pass)
+                    
+                    # 1. サーバーから最新のHTMLを再度ダウンロードしてベースにする
+                    with open(LOCAL_HTML_PATH, "wb") as f:
+                        ftp.retrbinary(f"RETR {REMOTE_HTML_PATH}", f.write)
+                    
+                    with open(LOCAL_HTML_PATH, "r", encoding="utf-8") as f:
+                        soup = BeautifulSoup(f.read(), "html.parser")
+                    
+                    # 更新日の自動書き換え
+                    today_str = datetime.now().strftime("価格表更新日：%Y年%m月%d日")
+                    date_element = soup.find(class_="update-date")
+                    if date_element:
+                        date_element.string =
