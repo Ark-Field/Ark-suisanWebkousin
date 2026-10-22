@@ -155,4 +155,80 @@ else:
                     today_str = datetime.now().strftime("価格表更新日：%Y年%m月%d日")
                     date_element = soup.find(class_="update-date")
                     if date_element:
-                        date_element.string =
+                        date_element.string = today_str
+                    
+                    # 2. 表で編集されたテキスト情報をHTMLに反映
+                    for index, row in edited_df.iterrows():
+                        target_name_original = st.session_state.products[index]["商品名"]
+                        
+                        for tr in soup.find_all("tr"):
+                            name_div = tr.find(class_="product-name")
+                            if name_div and name_div.text.strip() == target_name_original.strip():
+                                # 商品名
+                                name_div.string = row["商品名"]
+                                
+                                # ロット
+                                lot_div = tr.find(class_="product-lot")
+                                if lot_div:
+                                    lot_div.string = f"ロット: {row['ロット']}"
+                                
+                                # 価格
+                                price_td = tr.find(class_="price-col")
+                                if price_td:
+                                    price_td.string = row["価格"]
+                                
+                                # 備考
+                                note_td = tr.find(class_="note-col")
+                                if note_td:
+                                    note_td.string = row["備考"]
+                                
+                                # input要素のデータ属性も連動
+                                qty_input = tr.find(class_="qty-input")
+                                if qty_input:
+                                    qty_input["data-name"] = row["商品名"]
+                                    qty_input["data-lot"] = row["ロット"]
+                                    qty_input["data-price"] = row["価格"]
+                                    qty_input["name"] = row["商品名"]
+                                
+                                break
+
+                    # 3. 画像のアップロードとHTML書き換え
+                    for p_name, img_file in st.session_state.image_updates.items():
+                        safe_name = re.sub(r'[^\w\-_]', '_', p_name)
+                        img_filename = f"{safe_name}.jpg"
+                        remote_img_path = f"cyumon/images/{img_filename}"
+                        
+                        temp_img_path = f"temp_{img_filename}"
+                        with open(temp_img_path, "wb") as f:
+                            f.write(img_file.getbuffer())
+                        
+                        # 画像をFTPアップロード
+                        with open(temp_img_path, "rb") as f:
+                            ftp.storbinary(f"STOR {remote_img_path}", f)
+                        
+                        if os.path.exists(temp_img_path):
+                            os.remove(temp_img_path)
+                        
+                        # HTML側の<img>タグを更新
+                        for tr in soup.find_all("tr"):
+                            name_div = tr.find(class_="product-name")
+                            if name_div and name_div.text.strip() == p_name.strip():
+                                img_col = tr.find(class_="img-col")
+                                if img_col:
+                                    img_col.clear()
+                                    new_img = soup.new_tag("img", src=f"./images/{img_filename}")
+                                    img_col.append(new_img)
+                                break
+
+                    # ローカルHTMLに保存してアップロード
+                    with open(LOCAL_HTML_PATH, "w", encoding="utf-8") as f:
+                        f.write(str(soup))
+                    
+                    with open(LOCAL_HTML_PATH, "rb") as f:
+                        ftp.storbinary(f"STOR {REMOTE_HTML_PATH}", f)
+                    
+                    ftp.quit()
+                    st.success("🎉 すべての変更がサーバーに正常に反映されました！")
+                    
+                except Exception as e:
+                    st.error(f"❌ 更新中にエラーが発生しました: {e}")
