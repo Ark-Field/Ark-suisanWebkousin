@@ -25,6 +25,8 @@ if "products" not in st.session_state:
     st.session_state.products = None
 if "edit_products" not in st.session_state:
     st.session_state.edit_products = None
+if "other_rows" not in st.session_state:
+    st.session_state.other_rows = []
 if "image_updates" not in st.session_state:
     st.session_state.image_updates = {}
 if "ftp_password" not in st.session_state:
@@ -54,13 +56,14 @@ with st.sidebar:
                     soup = BeautifulSoup(f.read(), "html.parser")
                 
                 products = []
+                other_rows = []
+                
                 for idx, tr in enumerate(soup.find_all("tr")):
                     name_div = tr.find(class_="product-name")
                     if not name_div:
                         continue
                     
                     p_name = name_div.text.strip()
-                    
                     lot_div = tr.find(class_="product-lot")
                     p_lot = lot_div.text.replace("ロット:", "").strip() if lot_div else ""
                     
@@ -72,26 +75,35 @@ with st.sidebar:
                     
                     img_col = tr.find(class_="img-col")
                     has_img = "No Image" not in img_col.text if img_col else False
-                    
                     img_tag = img_col.find("img") if img_col else None
                     img_src = img_tag.get("src", "") if img_tag else ""
                     
-                    products.append({
+                    # 送料や税別案内などの特殊行（価格がない、または特定の文言）は別管理にする
+                    is_info_row = ("商品（税別" in p_name) or ("サイズ" in p_name and "円" in p_name)
+                    
+                    row_data = {
                         "id": idx,
                         "商品名": p_name,
                         "ロット": p_lot,
                         "価格": p_price,
                         "備考": p_note,
                         "画像状態": "画像あり" if has_img else "No Image",
-                        "img_src": img_src
-                    })
+                        "img_src": img_src,
+                        "html_tr": str(tr) # その他の行はHTMLをそのまま保持
+                    }
+                    
+                    if is_info_row:
+                        other_rows.append(row_data)
+                    else:
+                        products.append(row_data)
                 
                 st.session_state.products = products
-                # 初期順序（order）を付与
+                st.session_state.other_rows = other_rows
+                
                 for i, p in enumerate(products):
                     p["order"] = i + 1
                 st.session_state.edit_products = [dict(p) for p in products]
-                st.success(f"✅ {len(products)}件の商品データを読み込みました！")
+                st.success(f"✅ 商品 {len(products)}件、案内行 {len(other_rows)}件 を正常に読み込みました！")
             except Exception as e:
                 st.error(f"❌ エラー: {e}")
 
@@ -100,15 +112,13 @@ if st.session_state.products is None:
     st.info("👈 まず左側のサイドバーにFTPパスワードを入力し、「サーバーから商品データを取得」ボタンを押してください。")
 else:
     st.markdown("---")
-    st.subheader("📝 2. 商品情報の編集・並び替え（番号指定方式）・行の追加・削除")
-    st.write("各行の「**並び順番号**」に数字（1, 2, 3...）を入力し、下の **[🔄 この番号順に並び替える]** ボタンを押すと、一発で並び順が反映されます。")
+    st.subheader("📝 2. 商品情報の編集・並び替え・行の追加・削除")
+    st.write("各行の「**並び順番号**」に数字（1, 2, 3...）を入力し、下の **[🔄 この番号順に並び替える]** ボタンを押すと、商品のみ綺麗に並び替わります。")
     
     if st.session_state.edit_products is None:
         st.session_state.edit_products = [dict(p) for p in st.session_state.products]
 
-    # 並び替え実行ボタンを上部に配置
     if st.button("🔄 入力された「並び順番号」の通りに並び替える", type="primary"):
-        # 現在の入力値を一時保存してからソート
         for i, prod in enumerate(st.session_state.edit_products):
             if f"order_{i}" in st.session_state:
                 try:
@@ -124,9 +134,7 @@ else:
             if f"note_{i}" in st.session_state:
                 prod["備考"] = st.session_state[f"note_{i}"]
         
-        # orderの数値順に昇順ソート
         st.session_state.edit_products = sorted(st.session_state.edit_products, key=lambda x: x.get("order", 999))
-        # 連番を振り直す
         for idx, p in enumerate(st.session_state.edit_products):
             p["order"] = idx + 1
         st.success("✨ 並び順を更新しました！")
@@ -134,7 +142,6 @@ else:
 
     st.markdown("---")
 
-    # ヘッダー行の表示（並び順カラムを追加）
     h_cols = st.columns([0.8, 2.5, 1.2, 1.2, 2.5, 0.6])
     h_cols[0].markdown("**並び順**")
     h_cols[1].markdown("**商品名**")
@@ -154,7 +161,6 @@ else:
         p_price = cols[3].text_input("価格", value=prod.get("価格", ""), key=f"price_{i}", label_visibility="collapsed")
         p_note = cols[4].text_input("備考", value=prod.get("備考", ""), key=f"note_{i}", label_visibility="collapsed")
         
-        # 削除ボタン
         if cols[5].button("🗑️", key=f"del_{i}"):
             st.session_state.edit_products.pop(i)
             st.rerun()
@@ -225,34 +231,31 @@ else:
                     ftp = FTP(FTP_HOST)
                     ftp.login(FTP_USER, st.session_state.ftp_password)
                     
-                    # 1. 最新HTMLダウンロード
                     with open(LOCAL_HTML_PATH, "wb") as f:
                         ftp.retrbinary(f"RETR {REMOTE_HTML_PATH}", f.write)
                     
                     with open(LOCAL_HTML_PATH, "r", encoding="utf-8") as f:
                         soup = BeautifulSoup(f.read(), "html.parser")
                     
-                    # 更新日の書き換え
                     today_str = datetime.now().strftime("価格表更新日：%Y年%m月%d日")
                     date_element = soup.find(class_="update-date")
                     if date_element:
                         date_element.string = today_str
                     
-                    # 2. テーブルの tbody をクリアして再構築（現在の並び順通りに反映）
                     tbody = soup.find("tbody")
                     if tbody:
                         tbody.clear()
                         
+                        # 1. 通常商品を書き込み
                         for row in st.session_state.edit_products:
                             p_name = str(row.get("商品名", "")).strip()
                             if not p_name:
-                                continue  # 空行はスキップ
+                                continue
                             
                             p_lot = str(row.get("ロット", "")).strip()
                             p_price = str(row.get("価格", "")).strip()
                             p_note = str(row.get("備考", "")).strip()
                             
-                            # 画像パスの決定
                             img_src = "./images/no-image.jpg"
                             has_custom_img = False
                             
@@ -268,10 +271,8 @@ else:
                                 img_src = f"./images/{img_filename}"
                                 has_custom_img = True
 
-                            # HTMLの各列タグを組み立て
                             new_tr = soup.new_tag("tr")
                             
-                            # 画像列
                             td_img = soup.new_tag("td", attrs={"class": "img-col"})
                             if has_custom_img and img_src:
                                 a_tag = soup.new_tag("a", attrs={"href": img_src, "target": "_blank", "title": "クリックして拡大表示"})
@@ -284,7 +285,6 @@ else:
                                 td_img.append(span_no_img)
                             new_tr.append(td_img)
                             
-                            # 商品情報列
                             td_name = soup.new_tag("td", attrs={"class": "name-col"})
                             div_pname = soup.new_tag("div", attrs={"class": "product-name"})
                             div_pname.string = p_name
@@ -295,17 +295,14 @@ else:
                             td_name.append(div_plot)
                             new_tr.append(td_name)
                             
-                            # 価格列
                             td_price = soup.new_tag("td", attrs={"class": "price-col"})
                             td_price.string = p_price
                             new_tr.append(td_price)
                             
-                            # 備考列
                             td_note = soup.new_tag("td", attrs={"class": "note-col"})
                             td_note.string = p_note
                             new_tr.append(td_note)
                             
-                            # 注文数入力列
                             td_qty = soup.new_tag("td", attrs={"class": "qty-col"})
                             input_qty = soup.new_tag("input", attrs={
                                 "type": "number",
@@ -322,8 +319,14 @@ else:
                             new_tr.append(td_qty)
                             
                             tbody.append(new_tr)
+                        
+                        # 2. 保持していた送料・案内行をそのまま末尾に再追加
+                        for other in st.session_state.other_rows:
+                            other_tr = BeautifulSoup(other["html_tr"], "html.parser").tr
+                            if other_tr:
+                                tbody.append(other_tr)
 
-                    # 3. 新規・変更された画像を正方形リサイズしてアップロード
+                    # 3. 画像アップロード
                     for p_name, img_file in st.session_state.image_updates.items():
                         safe_name = re.sub(r'[^\w\-_]', '_', p_name)
                         img_filename = f"{safe_name}.jpg"
@@ -350,7 +353,6 @@ else:
                         if os.path.exists(temp_img_path):
                             os.remove(temp_img_path)
 
-                    # ローカル保存してアップロード
                     with open(LOCAL_HTML_PATH, "w", encoding="utf-8") as f:
                         f.write(str(soup))
                     
