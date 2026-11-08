@@ -87,6 +87,9 @@ with st.sidebar:
                     })
                 
                 st.session_state.products = products
+                # 初期順序（order）を付与
+                for i, p in enumerate(products):
+                    p["order"] = i + 1
                 st.session_state.edit_products = [dict(p) for p in products]
                 st.success(f"✅ {len(products)}件の商品データを読み込みました！")
             except Exception as e:
@@ -97,59 +100,73 @@ if st.session_state.products is None:
     st.info("👈 まず左側のサイドバーにFTPパスワードを入力し、「サーバーから商品データを取得」ボタンを押してください。")
 else:
     st.markdown("---")
-    st.subheader("📝 2. 商品情報の編集・並び替え・行の追加・削除")
-    st.write("各商品の横にある **[↑] [↓]** ボタンを押すと、クリックするだけで瞬時に表示順が入れ替わります。")
+    st.subheader("📝 2. 商品情報の編集・並び替え（番号指定方式）・行の追加・削除")
+    st.write("各行の「**並び順番号**」に数字（1, 2, 3...）を入力し、下の **[🔄 この番号順に並び替える]** ボタンを押すと、一発で並び順が反映されます。")
     
     if st.session_state.edit_products is None:
         st.session_state.edit_products = [dict(p) for p in st.session_state.products]
 
-    # 【重要】ボタンを押す前に現在のテキスト入力内容をデータに確実に同期させる
-    for i, prod in enumerate(st.session_state.edit_products):
-        if f"name_{i}" in st.session_state:
-            prod["商品名"] = st.session_state[f"name_{i}"]
-        if f"lot_{i}" in st.session_state:
-            prod["ロット"] = st.session_state[f"lot_{i}"]
-        if f"price_{i}" in st.session_state:
-            prod["価格"] = st.session_state[f"price_{i}"]
-        if f"note_{i}" in st.session_state:
-            prod["備考"] = st.session_state[f"note_{i}"]
+    # 並び替え実行ボタンを上部に配置
+    if st.button("🔄 入力された「並び順番号」の通りに並び替える", type="primary"):
+        # 現在の入力値を一時保存してからソート
+        for i, prod in enumerate(st.session_state.edit_products):
+            if f"order_{i}" in st.session_state:
+                try:
+                    prod["order"] = int(st.session_state[f"order_{i}"])
+                except ValueError:
+                    prod["order"] = i + 1
+            if f"name_{i}" in st.session_state:
+                prod["商品名"] = st.session_state[f"name_{i}"]
+            if f"lot_{i}" in st.session_state:
+                prod["ロット"] = st.session_state[f"lot_{i}"]
+            if f"price_{i}" in st.session_state:
+                prod["価格"] = st.session_state[f"price_{i}"]
+            if f"note_{i}" in st.session_state:
+                prod["備考"] = st.session_state[f"note_{i}"]
+        
+        # orderの数値順に昇順ソート
+        st.session_state.edit_products = sorted(st.session_state.edit_products, key=lambda x: x.get("order", 999))
+        # 連番を振り直す
+        for idx, p in enumerate(st.session_state.edit_products):
+            p["order"] = idx + 1
+        st.success("✨ 並び順を更新しました！")
+        st.rerun()
 
-    # ヘッダー行の表示
-    h_cols = st.columns([2.5, 1.2, 1.2, 2.5, 0.6, 0.6, 0.6])
-    h_cols[0].markdown("**商品名**")
-    h_cols[1].markdown("**ロット**")
-    h_cols[2].markdown("**価格**")
-    h_cols[3].markdown("**備考**")
-    h_cols[4].markdown("**上**")
-    h_cols[5].markdown("**下**")
-    h_cols[6].markdown("**削除**")
+    st.markdown("---")
+
+    # ヘッダー行の表示（並び順カラムを追加）
+    h_cols = st.columns([0.8, 2.5, 1.2, 1.2, 2.5, 0.6])
+    h_cols[0].markdown("**並び順**")
+    h_cols[1].markdown("**商品名**")
+    h_cols[2].markdown("**ロット**")
+    h_cols[3].markdown("**価格**")
+    h_cols[4].markdown("**備考**")
+    h_cols[5].markdown("**削除**")
 
     updated_products = []
     for i, prod in enumerate(st.session_state.edit_products):
-        cols = st.columns([2.5, 1.2, 1.2, 2.5, 0.6, 0.6, 0.6])
+        cols = st.columns([0.8, 2.5, 1.2, 1.2, 2.5, 0.6])
         
-        p_name = cols[0].text_input("商品名", value=prod.get("商品名", ""), key=f"name_{i}", label_visibility="collapsed")
-        p_lot = cols[1].text_input("ロット", value=prod.get("ロット", ""), key=f"lot_{i}", label_visibility="collapsed")
-        p_price = cols[2].text_input("価格", value=prod.get("価格", ""), key=f"price_{i}", label_visibility="collapsed")
-        p_note = cols[3].text_input("備考", value=prod.get("備考", ""), key=f"note_{i}", label_visibility="collapsed")
+        current_order = prod.get("order", i + 1)
+        p_order = cols[0].text_input("並び順", value=str(current_order), key=f"order_{i}", label_visibility="collapsed")
+        p_name = cols[1].text_input("商品名", value=prod.get("商品名", ""), key=f"name_{i}", label_visibility="collapsed")
+        p_lot = cols[2].text_input("ロット", value=prod.get("ロット", ""), key=f"lot_{i}", label_visibility="collapsed")
+        p_price = cols[3].text_input("価格", value=prod.get("価格", ""), key=f"price_{i}", label_visibility="collapsed")
+        p_note = cols[4].text_input("備考", value=prod.get("備考", ""), key=f"note_{i}", label_visibility="collapsed")
         
-        # 上へ移動ボタン
-        if cols[4].button("↑", key=f"up_{i}") and i > 0:
-            st.session_state.edit_products[i], st.session_state.edit_products[i-1] = st.session_state.edit_products[i-1], st.session_state.edit_products[i]
-            st.rerun()
-            
-        # 下へ移動ボタン
-        if cols[5].button("↓", key=f"down_{i}") and i < len(st.session_state.edit_products) - 1:
-            st.session_state.edit_products[i], st.session_state.edit_products[i+1] = st.session_state.edit_products[i+1], st.session_state.edit_products[i]
-            st.rerun()
-            
         # 削除ボタン
-        if cols[6].button("🗑️", key=f"del_{i}"):
+        if cols[5].button("🗑️", key=f"del_{i}"):
             st.session_state.edit_products.pop(i)
             st.rerun()
             
+        try:
+            order_val = int(p_order)
+        except ValueError:
+            order_val = i + 1
+
         updated_products.append({
             "id": prod.get("id", i),
+            "order": order_val,
             "商品名": p_name,
             "ロット": p_lot,
             "価格": p_price,
@@ -163,6 +180,7 @@ else:
     if st.button("➕ 新しい商品行を追加する"):
         st.session_state.edit_products.append({
             "id": len(st.session_state.edit_products),
+            "order": len(st.session_state.edit_products) + 1,
             "商品名": "",
             "ロット": "",
             "価格": "",
@@ -220,7 +238,7 @@ else:
                     if date_element:
                         date_element.string = today_str
                     
-                    # 2. テーブルの tbody をクリアして再構築（並び替えられた順番通りに反映）
+                    # 2. テーブルの tbody をクリアして再構築（現在の並び順通りに反映）
                     tbody = soup.find("tbody")
                     if tbody:
                         tbody.clear()
@@ -340,7 +358,7 @@ else:
                         ftp.storbinary(f"STOR {REMOTE_HTML_PATH}", f)
                     
                     ftp.quit()
-                    st.success("🎉 商品の並び替えと変更内容がサーバーに正常に反映されました！")
+                    st.success("🎉 商品の並び順と変更内容がサーバーに正常に反映されました！")
                     
                 except Exception as e:
                     st.error(f"❌ 更新中にエラーが発生しました: {e}")
