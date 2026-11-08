@@ -25,20 +25,24 @@ if "products" not in st.session_state:
     st.session_state.products = None
 if "image_updates" not in st.session_state:
     st.session_state.image_updates = {}
+if "ftp_password" not in st.session_state:
+    st.session_state.ftp_password = ""
 
 # サイドバー：接続とデータ読み込み
 with st.sidebar:
     st.header("🔑 1. 接続 & データ読込")
-    ftp_pass = st.text_input("FTPパスワード", type="password")
+    ftp_pass = st.text_input("FTPパスワード", type="password", value=st.session_state.ftp_password)
+    if ftp_pass:
+        st.session_state.ftp_password = ftp_pass
     
     if st.button("📥 サーバーから商品データを取得", type="primary"):
-        if not ftp_pass:
+        if not st.session_state.ftp_password:
             st.error("⚠️ パスワードを入力してください。")
         else:
             try:
                 with st.spinner("サーバーからHTMLをダウンロード中..."):
                     ftp = FTP(FTP_HOST)
-                    ftp.login(FTP_USER, ftp_pass)
+                    ftp.login(FTP_USER, st.session_state.ftp_password)
                     with open(LOCAL_HTML_PATH, "wb") as f:
                         ftp.retrbinary(f"RETR {REMOTE_HTML_PATH}", f.write)
                     ftp.quit()
@@ -138,13 +142,13 @@ else:
     st.info("編集・追加・削除が終わったら、下のボタンを押すと一括でサーバーが更新されます。")
     
     if st.button("変更を保存してサーバー（FTP）に反映する", type="primary"):
-        if not ftp_pass:
+        if not st.session_state.ftp_password:
             st.error("⚠️ 左側のサイドバーにFTPパスワードを入力してください。")
         else:
             with st.spinner("サーバーのHTMLを更新し、画像をアップロード中..."):
                 try:
                     ftp = FTP(FTP_HOST)
-                    ftp.login(FTP_USER, ftp_pass)
+                    ftp.login(FTP_USER, st.session_state.ftp_password)
                     
                     # 1. 最新HTMLダウンロード
                     with open(LOCAL_HTML_PATH, "wb") as f:
@@ -192,7 +196,7 @@ else:
                             # HTMLの各列タグを組み立て
                             new_tr = soup.new_tag("tr")
                             
-                            # 画像列（★画像をクリックすると別タブで拡大表示されるように <a> タグで囲む）
+                            # 画像列
                             td_img = soup.new_tag("td", attrs={"class": "img-col"})
                             if has_custom_img and img_src:
                                 a_tag = soup.new_tag("a", attrs={"href": img_src, "target": "_blank", "title": "クリックして拡大表示"})
