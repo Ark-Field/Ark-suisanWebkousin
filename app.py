@@ -23,8 +23,6 @@ LOCAL_HTML_PATH = "index.html"
 # セッションステートの初期化
 if "products" not in st.session_state:
     st.session_state.products = None
-if "edit_products" not in st.session_state:
-    st.session_state.edit_products = None
 if "other_rows" not in st.session_state:
     st.session_state.other_rows = []
 if "image_updates" not in st.session_state:
@@ -78,18 +76,18 @@ with st.sidebar:
                     img_tag = img_col.find("img") if img_col else None
                     img_src = img_tag.get("src", "") if img_tag else ""
                     
-                    # 送料や税別案内などの特殊行（価格がない、または特定の文言）は別管理にする
+                    # 送料や税別案内などの特殊行は別管理にする
                     is_info_row = ("商品（税別" in p_name) or ("サイズ" in p_name and "円" in p_name)
                     
                     row_data = {
-                        "id": idx,
+                        "並び順": idx + 1,
                         "商品名": p_name,
                         "ロット": p_lot,
                         "価格": p_price,
                         "備考": p_note,
                         "画像状態": "画像あり" if has_img else "No Image",
                         "img_src": img_src,
-                        "html_tr": str(tr) # その他の行はHTMLをそのまま保持
+                        "html_tr": str(tr)
                     }
                     
                     if is_info_row:
@@ -97,12 +95,12 @@ with st.sidebar:
                     else:
                         products.append(row_data)
                 
+                # 綺麗に1から番号を振り直す
+                for i, p in enumerate(products):
+                    p["並び順"] = i + 1
+
                 st.session_state.products = products
                 st.session_state.other_rows = other_rows
-                
-                for i, p in enumerate(products):
-                    p["order"] = i + 1
-                st.session_state.edit_products = [dict(p) for p in products]
                 st.success(f"✅ 商品 {len(products)}件、案内行 {len(other_rows)}件 を正常に読み込みました！")
             except Exception as e:
                 st.error(f"❌ エラー: {e}")
@@ -112,95 +110,34 @@ if st.session_state.products is None:
     st.info("👈 まず左側のサイドバーにFTPパスワードを入力し、「サーバーから商品データを取得」ボタンを押してください。")
 else:
     st.markdown("---")
-    st.subheader("📝 2. 商品情報の編集・並び替え・行の追加・削除")
-    st.write("各行の「**並び順番号**」に数字（1, 2, 3...）を入力し、下の **[🔄 この番号順に並び替える]** ボタンを押すと、商品のみ綺麗に並び替わります。")
+    st.subheader("📝 2. 商品情報の編集・並び替え（番号指定）・行の追加・削除")
+    st.write("表の「**並び順**」列に数字（1, 2, 3...）を入力して並び替えるか、下部の **[+]** から新しい行を追加できます。")
     
-    if st.session_state.edit_products is None:
-        st.session_state.edit_products = [dict(p) for p in st.session_state.products]
-
-    if st.button("🔄 入力された「並び順番号」の通りに並び替える", type="primary"):
-        for i, prod in enumerate(st.session_state.edit_products):
-            if f"order_{i}" in st.session_state:
-                try:
-                    prod["order"] = int(st.session_state[f"order_{i}"])
-                except ValueError:
-                    prod["order"] = i + 1
-            if f"name_{i}" in st.session_state:
-                prod["商品名"] = st.session_state[f"name_{i}"]
-            if f"lot_{i}" in st.session_state:
-                prod["ロット"] = st.session_state[f"lot_{i}"]
-            if f"price_{i}" in st.session_state:
-                prod["価格"] = st.session_state[f"price_{i}"]
-            if f"note_{i}" in st.session_state:
-                prod["備考"] = st.session_state[f"note_{i}"]
-        
-        st.session_state.edit_products = sorted(st.session_state.edit_products, key=lambda x: x.get("order", 999))
-        for idx, p in enumerate(st.session_state.edit_products):
-            p["order"] = idx + 1
-        st.success("✨ 並び順を更新しました！")
-        st.rerun()
-
-    st.markdown("---")
-
-    h_cols = st.columns([0.8, 2.5, 1.2, 1.2, 2.5, 0.6])
-    h_cols[0].markdown("**並び順**")
-    h_cols[1].markdown("**商品名**")
-    h_cols[2].markdown("**ロット**")
-    h_cols[3].markdown("**価格**")
-    h_cols[4].markdown("**備考**")
-    h_cols[5].markdown("**削除**")
-
-    updated_products = []
-    for i, prod in enumerate(st.session_state.edit_products):
-        cols = st.columns([0.8, 2.5, 1.2, 1.2, 2.5, 0.6])
-        
-        current_order = prod.get("order", i + 1)
-        p_order = cols[0].text_input("並び順", value=str(current_order), key=f"order_{i}", label_visibility="collapsed")
-        p_name = cols[1].text_input("商品名", value=prod.get("商品名", ""), key=f"name_{i}", label_visibility="collapsed")
-        p_lot = cols[2].text_input("ロット", value=prod.get("ロット", ""), key=f"lot_{i}", label_visibility="collapsed")
-        p_price = cols[3].text_input("価格", value=prod.get("価格", ""), key=f"price_{i}", label_visibility="collapsed")
-        p_note = cols[4].text_input("備考", value=prod.get("備考", ""), key=f"note_{i}", label_visibility="collapsed")
-        
-        if cols[5].button("🗑️", key=f"del_{i}"):
-            st.session_state.edit_products.pop(i)
-            st.rerun()
-            
-        try:
-            order_val = int(p_order)
-        except ValueError:
-            order_val = i + 1
-
-        updated_products.append({
-            "id": prod.get("id", i),
-            "order": order_val,
-            "商品名": p_name,
-            "ロット": p_lot,
-            "価格": p_price,
-            "備考": p_note,
-            "画像状態": prod.get("画像状態", "No Image"),
-            "img_src": prod.get("img_src", "")
-        })
-
-    st.session_state.edit_products = updated_products
-
-    if st.button("➕ 新しい商品行を追加する"):
-        st.session_state.edit_products.append({
-            "id": len(st.session_state.edit_products),
-            "order": len(st.session_state.edit_products) + 1,
-            "商品名": "",
-            "ロット": "",
-            "価格": "",
-            "備考": "",
-            "画像状態": "No Image",
-            "img_src": ""
-        })
-        st.rerun()
+    # DataFrameにしてエディタで表示
+    df_products = pd.DataFrame(st.session_state.products)
+    
+    edited_df = st.data_editor(
+        df_products[["並び順", "商品名", "ロット", "価格", "備考", "画像状態"]],
+        column_config={
+            "並び順": st.column_config.NumberColumn("並び順", min_value=1, step=1, width="small"),
+            "画像状態": st.column_config.TextColumn("画像状態", disabled=True, width="small"),
+            "商品名": st.column_config.TextColumn("商品名", width="medium"),
+            "ロット": st.column_config.TextColumn("ロット", width="small"),
+            "価格": st.column_config.TextColumn("価格", width="small"),
+            "備考": st.column_config.TextColumn("備考", width="small"),
+        },
+        hide_index=True,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="product_table_editor"
+    )
 
     st.markdown("---")
     st.subheader("🖼️ 3. 写真（画像）の入れ替え・追加（自動正方形リサイズ）")
-    product_names = [name for name in [p.get("商品名", "") for p in st.session_state.edit_products] if name.strip() != ""]
-    if product_names:
-        selected_product = st.selectbox("写真を変更・追加する商品を選択", product_names)
+    
+    valid_product_names = [name for name in edited_df["商品名"].dropna().tolist() if str(name).strip() != ""]
+    if valid_product_names:
+        selected_product = st.selectbox("写真を変更・追加する商品を選択", valid_product_names)
         uploaded_image = st.file_uploader("新しい画像を選択", type=["jpg", "jpeg", "png"], key="img_uploader")
         
         if uploaded_image is not None:
@@ -220,7 +157,7 @@ else:
 
     st.markdown("---")
     st.subheader("🚀 4. サーバーへの反映")
-    st.info("並び替え・編集・追加・削除が終わったら、下のボタンを押すと一括でサーバーが更新されます。")
+    st.info("「並び順」の数字順に自動で並び替えてサーバーに反映されます。")
     
     if st.button("変更を保存してサーバー（FTP）に反映する", type="primary"):
         if not st.session_state.ftp_password:
@@ -228,6 +165,9 @@ else:
         else:
             with st.spinner("サーバーのHTMLを更新し、画像をアップロード中..."):
                 try:
+                    # 1. 「並び順」の数値に基づいてデータフレームを昇順ソート
+                    sorted_df = edited_df.sort_values(by="並び順", ascending=True).reset_index(drop=True)
+
                     ftp = FTP(FTP_HOST)
                     ftp.login(FTP_USER, st.session_state.ftp_password)
                     
@@ -246,16 +186,22 @@ else:
                     if tbody:
                         tbody.clear()
                         
-                        # 1. 通常商品を書き込み
-                        for row in st.session_state.edit_products:
+                        # 2. ソートされた順番通りにHTMLの行を再構築
+                        for _, row in sorted_df.iterrows():
                             p_name = str(row.get("商品名", "")).strip()
-                            if not p_name:
+                            if not p_name or p_name == "nan":
                                 continue
                             
                             p_lot = str(row.get("ロット", "")).strip()
-                            p_price = str(row.get("価格", "")).strip()
-                            p_note = str(row.get("備考", "")).strip()
+                            if p_lot == "nan": p_lot = ""
                             
+                            p_price = str(row.get("価格", "")).strip()
+                            if p_price == "nan": p_price = ""
+                            
+                            p_note = str(row.get("備考", "")).strip()
+                            if p_note == "nan": p_note = ""
+                            
+                            # 画像パスの決定
                             img_src = "./images/no-image.jpg"
                             has_custom_img = False
                             
@@ -291,7 +237,7 @@ else:
                             td_name.append(div_pname)
                             
                             div_plot = soup.new_tag("div", attrs={"class": "product-lot"})
-                            div_plot.string = f"ロット: {p_lot}"
+                            div_plot.string = f"ロット: {p_lot}" if p_lot else "ロット: "
                             td_name.append(div_plot)
                             new_tr.append(td_name)
                             
@@ -320,13 +266,13 @@ else:
                             
                             tbody.append(new_tr)
                         
-                        # 2. 保持していた送料・案内行をそのまま末尾に再追加
+                        # 3. 保持していた送料・案内行を末尾に再追加
                         for other in st.session_state.other_rows:
                             other_tr = BeautifulSoup(other["html_tr"], "html.parser").tr
                             if other_tr:
                                 tbody.append(other_tr)
 
-                    # 3. 画像アップロード
+                    # 4. 画像アップロード処理
                     for p_name, img_file in st.session_state.image_updates.items():
                         safe_name = re.sub(r'[^\w\-_]', '_', p_name)
                         img_filename = f"{safe_name}.jpg"
@@ -357,10 +303,10 @@ else:
                         f.write(str(soup))
                     
                     with open(LOCAL_HTML_PATH, "rb") as f:
-                        ftp.storbinary(f"STOR {REMOTE_HTML_PATH}", f)
+                        ftp.storbinary(f"REMOTE_HTML_PATH" if False else REMOTE_HTML_PATH, f)
                     
                     ftp.quit()
-                    st.success("🎉 商品の並び順と変更内容がサーバーに正常に反映されました！")
+                    st.success("🎉 指定した「並び順」の通りに並び替えられ、サーバーの更新が完了しました！")
                     
                 except Exception as e:
                     st.error(f"❌ 更新中にエラーが発生しました: {e}")
