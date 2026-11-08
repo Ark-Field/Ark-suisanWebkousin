@@ -103,6 +103,17 @@ else:
     if st.session_state.edit_products is None:
         st.session_state.edit_products = [dict(p) for p in st.session_state.products]
 
+    # 【重要】ボタンを押す前に現在のテキスト入力内容をデータに確実に同期させる
+    for i, prod in enumerate(st.session_state.edit_products):
+        if f"name_{i}" in st.session_state:
+            prod["商品名"] = st.session_state[f"name_{i}"]
+        if f"lot_{i}" in st.session_state:
+            prod["ロット"] = st.session_state[f"lot_{i}"]
+        if f"price_{i}" in st.session_state:
+            prod["価格"] = st.session_state[f"price_{i}"]
+        if f"note_{i}" in st.session_state:
+            prod["備考"] = st.session_state[f"note_{i}"]
+
     # ヘッダー行の表示
     h_cols = st.columns([2.5, 1.2, 1.2, 2.5, 0.6, 0.6, 0.6])
     h_cols[0].markdown("**商品名**")
@@ -329,7 +340,7 @@ else:
                         ftp.storbinary(f"STOR {REMOTE_HTML_PATH}", f)
                     
                     ftp.quit()
-                    st.success("🎉 商品の並び順と変更内容がサーバーに正常に反映されました！")
+                    st.success("🎉 商品の並び替えと変更内容がサーバーに正常に反映されました！")
                     
                 except Exception as e:
                     st.error(f"❌ 更新中にエラーが発生しました: {e}")
