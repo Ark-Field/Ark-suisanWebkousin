@@ -45,8 +45,16 @@ with st.sidebar:
                 with st.spinner("サーバーからHTMLをダウンロード中..."):
                     ftp = FTP(FTP_HOST)
                     ftp.login(FTP_USER, st.session_state.ftp_password)
+                    
+                    # リモートパスからフォルダ名とファイル名を分解して安全に移動
+                    remote_dir = os.path.dirname(REMOTE_HTML_PATH)   # 例: "cyumon"
+                    remote_file = os.path.basename(REMOTE_HTML_PATH) # 例: "index.html"
+                    
+                    if remote_dir:
+                        ftp.cwd(remote_dir)
+                        
                     with open(LOCAL_HTML_PATH, "wb") as f:
-                        ftp.retrbinary(f"RETR {REMOTE_HTML_PATH}", f.write)
+                        ftp.retrbinary(f"RETR {remote_file}", f.write)
                     ftp.quit()
                 
                 # HTMLを解析して商品リストを抽出
@@ -76,7 +84,6 @@ with st.sidebar:
                     img_tag = img_col.find("img") if img_col else None
                     img_src = img_tag.get("src", "") if img_tag else ""
                     
-                    # 送料や税別案内などの特殊行は別管理にする
                     is_info_row = ("商品（税別" in p_name) or ("サイズ" in p_name and "円" in p_name)
                     
                     row_data = {
@@ -95,7 +102,6 @@ with st.sidebar:
                     else:
                         products.append(row_data)
                 
-                # 綺麗に1から番号を振り直す
                 for i, p in enumerate(products):
                     p["並び順"] = i + 1
 
@@ -113,7 +119,6 @@ else:
     st.subheader("📝 2. 商品情報の編集・並び替え（番号指定）・行の追加・削除")
     st.write("表の「**並び順**」列に数字（1, 2, 3...）を入力して並び替えるか、下部の **[+]** から新しい行を追加できます。")
     
-    # DataFrameにしてエディタで表示
     df_products = pd.DataFrame(st.session_state.products)
     
     edited_df = st.data_editor(
@@ -165,14 +170,19 @@ else:
         else:
             with st.spinner("サーバーのHTMLを更新し、画像をアップロード中..."):
                 try:
-                    # 1. 「並び順」の数値に基づいてデータフレームを昇順ソート
                     sorted_df = edited_df.sort_values(by="並び順", ascending=True).reset_index(drop=True)
 
                     ftp = FTP(FTP_HOST)
                     ftp.login(FTP_USER, st.session_state.ftp_password)
                     
+                    remote_dir = os.path.dirname(REMOTE_HTML_PATH)
+                    remote_file = os.path.basename(REMOTE_HTML_PATH)
+                    
+                    if remote_dir:
+                        ftp.cwd(remote_dir)
+                    
                     with open(LOCAL_HTML_PATH, "wb") as f:
-                        ftp.retrbinary(f"RETR {REMOTE_HTML_PATH}", f.write)
+                        ftp.retrbinary(f"RETR {remote_file}", f.write)
                     
                     with open(LOCAL_HTML_PATH, "r", encoding="utf-8") as f:
                         soup = BeautifulSoup(f.read(), "html.parser")
@@ -186,7 +196,6 @@ else:
                     if tbody:
                         tbody.clear()
                         
-                        # 2. ソートされた順番通りにHTMLの行を再構築
                         for _, row in sorted_df.iterrows():
                             p_name = str(row.get("商品名", "")).strip()
                             if not p_name or p_name == "nan":
@@ -201,7 +210,6 @@ else:
                             p_note = str(row.get("備考", "")).strip()
                             if p_note == "nan": p_note = ""
                             
-                            # 画像パスの決定
                             img_src = "./images/no-image.jpg"
                             has_custom_img = False
                             
@@ -266,17 +274,24 @@ else:
                             
                             tbody.append(new_tr)
                         
-                        # 3. 保持していた送料・案内行を末尾に再追加
                         for other in st.session_state.other_rows:
                             other_tr = BeautifulSoup(other["html_tr"], "html.parser").tr
                             if other_tr:
                                 tbody.append(other_tr)
 
-                    # 4. 画像アップロード処理
+                    # 画像アップロード処理（imagesフォルダに移動してアップロード）
+                    try:
+                        ftp.cwd("images")
+                    except Exception:
+                        try:
+                            ftp.mkd("images")
+                            ftp.cwd("images")
+                        except Exception:
+                            pass
+
                     for p_name, img_file in st.session_state.image_updates.items():
                         safe_name = re.sub(r'[^\w\-_]', '_', p_name)
                         img_filename = f"{safe_name}.jpg"
-                        remote_img_path = f"cyumon/images/{img_filename}"
                         
                         img = Image.open(img_file)
                         if img.mode in ("RGBA", "P"):
@@ -294,16 +309,20 @@ else:
                         new_img.save(temp_img_path, "JPEG", quality=90)
                         
                         with open(temp_img_path, "rb") as f:
-                            ftp.storbinary(f"STOR {remote_img_path}", f)
+                            ftp.storbinary(f"STOR {img_filename}", f)
                         
                         if os.path.exists(temp_img_path):
                             os.remove(temp_img_path)
 
+                    # 元のディレクトリ（cyumon）に戻る
+                    ftp.cwd("..")
+
+                    # HTMLの保存とアップロード
                     with open(LOCAL_HTML_PATH, "w", encoding="utf-8") as f:
                         f.write(str(soup))
                     
                     with open(LOCAL_HTML_PATH, "rb") as f:
-                        ftp.storbinary(f"REMOTE_HTML_PATH" if False else REMOTE_HTML_PATH, f)
+                        ftp.storbinary(f"STOR {remote_file}", f)
                     
                     ftp.quit()
                     st.success("🎉 指定した「並び順」の通りに並び替えられ、サーバーの更新が完了しました！")
